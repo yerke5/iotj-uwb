@@ -1,33 +1,8 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from EKF_Fusion import EKF_Fusion_2D
-from scipy.signal import butter, filtfilt
 from scipy.stats import chi2
-from typing import Dict, List, Tuple, Optional
-
-def trilateration(anchors, distances):
-	# Prepare the system of equations
-	A = []
-	b = []
-
-	# Construct the linear equations by subtracting the first equation from the others
-	for i in range(1, len(anchors)):
-		x_diff = anchors[i][0] - anchors[0][0]
-		y_diff = anchors[i][1] - anchors[0][1]
-		d_diff = distances[0]**2 - distances[i]**2
-		c_diff = anchors[i][0]**2 - anchors[0][0]**2 + anchors[i][1]**2 - anchors[0][1]**2
-		
-		A.append([2 * x_diff, 2 * y_diff])
-		b.append(d_diff + c_diff)
-
-	A = np.array(A)
-	b = np.array(b)
-
-	#print("A shape:", A.shape, "b shape:", b.shape)
-	# Solve the system using the least squares method
-	position, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
-	return position 
+from typing import Optional
 
 def merge_uwb_imu_data(uwb_data, imu_data, uwb_rows):
     uwb_data = uwb_data.copy(deep=True)
@@ -102,87 +77,6 @@ def merge_uwb_imu_data(uwb_data, imu_data, uwb_rows):
     # ==============================================================================
 
     return all_data
-
-def _estimate_uwb_heading_rate(uwb_df):
-    """Estimate heading and heading rate from UWB XY positions.
-    Returns timestamps (t), heading (rad), and heading rate dpsi/dt aligned to UWB timestamps.
-    """
-    df = uwb_df.dropna(subset=['PositionX', 'PositionY']).copy()
-    if len(df) < 3:
-        return None, None, None
-    xy = df[['PositionX', 'PositionY']].values.astype(float)
-    t = df['Timestamp'].values.astype(float)
-    dx = np.gradient(xy[:, 0], t)
-    dy = np.gradient(xy[:, 1], t)
-    psi = np.arctan2(dy, dx)
-    psi_unwrapped = np.unwrap(psi)
-    dpsi = np.gradient(psi_unwrapped, t)
-    # light low-pass on dpsi to reduce noise
-    if len(dpsi) >= 9:
-        b, a = butter(2, 0.2)  # normalized cutoff ~0.2 Nyquist in UWB rate domain
-        try:
-            dpsi = filtfilt(b, a, dpsi)
-        except Exception:
-            pass
-    return t, psi_unwrapped, dpsi
-
-def calibrate_gyro_axis(all_data):
-    """Pick gyro axis and sign that best matches UWB heading rate over a short window after first fix."""
-    # build UWB-only dataframe
-    uwb_only = all_data[all_data['type'] == 'uwb'][['Timestamp', 'PositionX', 'PositionY']].dropna()
-    if len(uwb_only) < 5:
-        return ('GyroscopeY', 1.0)  # default
-    # limit to first few seconds to avoid long-run drift
-    t0 = uwb_only['Timestamp'].iloc[0]
-    uwb_cal = uwb_only[uwb_only['Timestamp'] <= t0 + 5.0]
-    if len(uwb_cal) < 5:
-        uwb_cal = uwb_only
-    t_u, _, dpsi_u = _estimate_uwb_heading_rate(uwb_cal.rename(columns={'Timestamp': 'Timestamp', 'PositionX': 'PositionX', 'PositionY': 'PositionY'}))
-    if dpsi_u is None:
-        return ('GyroscopeY', 1.0)
-
-    # interpolate UWB heading rate to IMU timestamps in same window
-    imu_window = all_data[(all_data['Timestamp'] >= t_u[0]) & (all_data['Timestamp'] <= t_u[-1])]
-    t_i = imu_window['Timestamp'].values.astype(float)
-    if len(t_i) < 5:
-        return ('GyroscopeY', 1.0)
-    dpsi_i = np.interp(t_i, t_u, dpsi_u)
-
-    candidates = ['GyroscopeX', 'GyroscopeY', 'GyroscopeZ']
-    best = None
-    best_corr = -np.inf
-    corr_table = []
-    for axis in candidates:
-        if axis not in imu_window:
-            continue
-        g = imu_window[axis].values.astype(float)
-        # basic outlier guard
-        if not np.all(np.isfinite(g)):
-            continue
-        for sgn in (+1.0, -1.0):
-            gg = sgn * g
-            # remove NaNs
-            mask = np.isfinite(gg) & np.isfinite(dpsi_i)
-            if mask.sum() < 5:
-                continue
-            corr = np.corrcoef(gg[mask], dpsi_i[mask])[0, 1]
-            if np.isnan(corr):
-                continue
-            corr_table.append((axis, int(sgn), float(corr)))
-            if abs(corr) > best_corr:
-                best_corr = abs(corr)
-                best = (axis, np.sign(corr))  # prefer positive correlation
-    if best is None:
-        return ('GyroscopeY', 1.0)
-    # Print a small summary to help manual verification
-    try:
-        print("Gyro axis calibration (axis, sign, corr):")
-        for a, s, c in sorted(corr_table, key=lambda x: -abs(x[2])):
-            print(f"  {a:>11}  {s:+d}  corr={c:+.3f}")
-        print(f"Chosen axis: {best[0]} with sign {int(best[1])} (|corr|={best_corr:.3f})")
-    except Exception:
-        pass
-    return best
 
 def setup_ekf(uwb_data):
     # Initialize position from first UWB fix
@@ -368,65 +262,6 @@ def run_ekf(ekf, all_data, initial_state, smooth=True,
     if return_state_history:
         return Xs[:, :2], np.array(timestamps), np.array(valid_idxs), state_history
     return Xs[:, :2], np.array(timestamps), np.array(valid_idxs)
-
-# ---------------------------------------------------------------
-# A. Plotting Helper
-# ---------------------------------------------------------------
-def plot_filtered_path(states: np.ndarray, all_data: pd.DataFrame, diag: Optional[dict]=None,
-                       anchors: Optional[Dict[str, np.ndarray]]=None, title:str="Filtered Trajectory",
-                       show: bool=True, save_path: Optional[str]=None):
-    """Visualize continuous filtered path, sparse UWB updates, velocity vectors.
-
-    Parameters
-    ----------
-    states : (N, >=5) filtered state sequence from UKF/EKF (px, py, vx, vy, yaw, ...)
-    all_data : merged dataframe (must contain type, Timestamp, PositionX/Y for UWB rows if available)
-    diag : diagnostics dict to optionally overlay UWB update points (where innov_norm finite)
-    anchors : dict name-> (2,) anchor coordinates
-    title : plot title
-    show : display figure
-    save_path : optional filepath to save figure
-    """
-    plt.figure(figsize=(8,8))
-    # Full continuous trajectory
-    plt.plot(states[:,0], states[:,1], color='#4444aa', linewidth=1.0, label='Filtered path')
-
-    # UWB updates (either from diag or directly from df rows)
-    if diag is not None and 'innov_norm' in diag:
-        mask = np.isfinite(diag['innov_norm'])
-        if mask.any():
-            # Align states indexing: states was appended each iteration (initial + per row)
-            uwb_indices = np.where(mask)[0]
-            uwb_pts = states[1:][uwb_indices, :2]  # skip initial
-            plt.scatter(uwb_pts[:,0], uwb_pts[:,1], s=14, c='purple', label='UWB update (post)')
-    else:
-        uwb_rows = all_data[all_data['type']=='uwb'].dropna(subset=['PositionX','PositionY'])
-        if len(uwb_rows):
-            plt.scatter(uwb_rows['PositionX'], uwb_rows['PositionY'], c='purple', s=14, label='UWB meas')
-
-    # Velocity direction arrows (subsample)
-    if states.shape[0] > 10:
-        step = max(1, states.shape[0]//40)
-        for i in range(0, states.shape[0], step):
-            px, py, vx, vy = states[i,0], states[i,1], states[i,2], states[i,3]
-            plt.arrow(px, py, 0.4*vx, 0.4*vy, head_width=0.15, head_length=0.25, fc='orange', ec='orange', alpha=0.6)
-
-    # Anchors
-    if anchors:
-        for name, pos in anchors.items():
-            plt.scatter(pos[0], pos[1], marker='^', s=90, c='red')
-            plt.text(pos[0]+0.1, pos[1]+0.1, name, color='red', fontsize=9)
-
-    plt.title(title)
-    plt.axis('equal')
-    plt.legend(loc='best')
-    plt.xlabel('X (m)')
-    plt.ylabel('Y (m)')
-    plt.grid(alpha=0.3)
-    if save_path:
-        plt.savefig(save_path, dpi=150)
-    if show:
-        plt.show()
 
 def validate_position_update(ekf, position, chi2_thresh):
     """Mahalanobis distance gating for UWB updates."""

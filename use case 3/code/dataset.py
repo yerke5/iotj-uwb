@@ -1,28 +1,18 @@
 import collections
 import time
 import warnings
-#warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.filterwarnings("ignore")
 import numpy as np 
 import pandas as pd 
 import os 
 import matplotlib.pyplot as plt 
-import operator 
 import datetime as dt
-from matplotlib.ticker import PercentFormatter
-from colour import Color
 import util 
 import constants
-import seaborn as sns 
-from matplotlib.ticker import PercentFormatter
 import uwb_imu_fusion as te 
-import random
-import orientation_fusion 
-BLUE_PHONE_OFFSETS = (-.19, -.155)
 SHOP_OFFSETS = (-0.09, .15)
 S7_OFFSETS = (.07, -.365)
 load_raw_iphone_data = True 
-use_cached_trilateration = False
 
 
 def _estimate_object_nbytes(obj):
@@ -58,12 +48,6 @@ def load_data(
 	lidar_data_dir, 
 	lidar_orientations,
 	iphone_data_dir,
-	drop_risky_measured_azimuths, 
-	drop_risky_true_azimuths,
-	drop_risky_elevations, 
-	drop_risky_true_distances,
-	check_vectors_for_sanity,
-	check_abrupt_angle_changes,
 	by_measured,
 	start=None,
 	finish=None,
@@ -80,59 +64,27 @@ def load_data(
 		shop_locations, 
 		true_paths, 
 		by_measured,
-		drop_risky_measured_azimuths=drop_risky_measured_azimuths, 
-		drop_risky_true_azimuths=drop_risky_true_azimuths,
-		drop_risky_elevations=drop_risky_elevations, 
-		drop_risky_true_distances=drop_risky_true_distances,
-		check_vectors_for_sanity=check_vectors_for_sanity,
-		check_abrupt_angle_changes=check_abrupt_angle_changes,
 		start=start,
 		finish=finish,
 		cache_paths_on_disk=cache_paths_on_disk
 	)
 
-	#consolidate_shop_measurements_by_timestamp(iphone_paths, "unfiltered")
 	for data_type in consolidate_by_timestamp:
 		consolidate_shop_measurements_by_timestamp(iphone_paths, data_type)
-	#deduce_azimuths(shop_locations, iphone_paths, time_interval)
-	#consolidate_shop_measurements_by_timestamp(iphone_paths, "deduced")
 
 	return shop_locations, true_paths, iphone_paths, lidar_first_timestamps, iphone_first_timestamps, imu_data
 
 def azimuths2float(azimuths):	
 	if azimuths.dtype != np.float32 and azimuths.dtype != np.float64 and azimuths.dtype != float:
-		#print("type:", azimuths.dtype)
 		azimuths = azimuths.astype(str).str.replace("nil", f"{util.DUMMY}")
-		#azimuths = azimuths.str.replace("nil", f"{util.DUMMY}")
 
 	return azimuths.astype(np.float32)
-
-def quaternion_to_orientation(q):
-	yaw = np.arctan2(2.0*(q[1]*q[2] + q[3]*q[0]), q[3]*q[3] - q[0]*q[0] - q[1]*q[1] + q[2]*q[2])
-	pitch = np.arcsin(-2.0*(q[0]*q[2] - q[3]*q[1]))
-	roll = np.arctan2(2.0*(q[0]*q[1] + q[3]*q[2]), q[3]*q[3] + q[0]*q[0] - q[1]*q[1] - q[2]*q[2])
-	return roll
 
 def timestamp_to_number(timestamp):
 	return dt.datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%f').timestamp()
 
-def get_perpendicular_vector(vector):
-	return np.array([-vector[1], vector[0]])
-
-def get_phone_position_from_lidar(lidar_position, lidar_orientation):
-	orientation_vector = np.array([np.cos(lidar_orientation), np.sin(lidar_orientation)]) 
-	orientation_vector /= util.calculate_vector_length(orientation_vector)
-	perp = get_perpendicular_vector(orientation_vector) 
-	perp /= util.calculate_vector_length(perp)
-	left = lidar_position - .1 * perp
-	right = lidar_position + .1 * perp 
-	mid = (left + right) / 2
-	res = mid - orientation_vector * constants.DISTANCE_FROM_LIDAR_TO_PHONE
-	return res
-
 def offset_position(position, orientation_vector, offset_x, offset_y):
 	para_vector = util.rotate_vector(orientation_vector, -90)
-	#print("positions shape:", position.shape, "para vector shape:", para_vector.shape, "orientation vec shape:", orientation_vector.shape, "offsets:", offset_x, offset_y)
 	position = position + offset_y * orientation_vector / util.calculate_vector_lengths(orientation_vector).reshape(-1, 1)
 	position = position + offset_x * para_vector / util.calculate_vector_lengths(para_vector).reshape(-1, 1)
 	return position
@@ -166,16 +118,6 @@ def load_lidar_data(
 			if not is_shop and not is_path:
 				continue
 			
-			# if os.path.exists(f"ground-truth/{path_id}.csv") or os.path.exists(f"ground-truth/{path_id}-{batch_id}.csv"):
-			# 	if os.path.exists(f"ground-truth/{path_id}.csv"):
-			# 		ground_truth_df = pd.read_csv(f"ground-truth/{path_id}.csv") 
-			# 	else:
-			# 		ground_truth_df = pd.read_csv(f"ground-truth/{path_id}-{batch_id}.csv")
-				
-			# 	positions = ground_truth_df.loc[:, ["PositionX", "PositionY"]].values
-			# 	orientations = ground_truth_df["Orientation"].values
-			# 	timestamps = ground_truth_df["Timestamp"].values 
-			# else:
 			with open(os.path.join(path_to_dir, filename), "r") as f:
 				init_ts = None
 				for line in f.readlines()[::-1] if is_shop else f.readlines():
@@ -187,7 +129,7 @@ def load_lidar_data(
 							data = data.split(": ")
 							if i == 0: # timestamp
 								timestamp = data[1][1:-1]
-								timestamp = timestamp_to_number(timestamp) #- timestamp_to_number(constants.REF_DATE)
+								timestamp = timestamp_to_number(timestamp)
 								
 								if is_path:
 									if not init_ts:
@@ -206,24 +148,16 @@ def load_lidar_data(
 								positions.append(position)
 							elif i == 2: # orientation
 								if lidar_orientations:
-									# orientation = list(map(float, data[1][1:-4].split(", ")))
-									# orientations.append(quaternion_to_orientation(orientation))
-									orientation = float(data[1][:-3])#quaternion_to_orientation(list(map(float, data[1][1:-4].split(", "))))
+									orientation = float(data[1][:-3])
 									orientations.append(orientation)
 								elif len(positions) > constants.ORIENTATION_STEPS:
 									orientation = util.get_orientation(positions, len(positions) - 1, constants.ORIENTATION_STEPS)
 									orientations.append(orientation)
 								
-								# if len(orientations) > 0:
-								# 	positions[-1] = get_phone_position_from_lidar(positions[-1], orientations[-1])
-								
 						lc += 1
 						if (is_shop and lc == constants.NUM_LIDAR_LINES) or (is_path and stop):
 							break 
 				
-				# if is_path:	
-				# 	edge_timestamps[path_id].append(timestamp)
-			
 			positions, orientations, timestamps = np.array(positions), np.array(orientations), np.array(timestamps) # add 90 degrees to all lidar orientations if the phone was facing to the front because the Velodyne text was facing to the right 
 		
 			ground_truth_df = pd.DataFrame({
@@ -265,70 +199,11 @@ def load_lidar_data(
 
 	return shops, paths, edge_timestamps
 
-def calculate_true_speeds(timestamps, positions):
-	idxs = np.argsort(timestamps)
-	timestamps = timestamps[idxs]
-	positions = positions[idxs]
-	distances, delta_ts = [], []
-
-	max_dist = -1
-	max_dist_idx = -1
-	max_delta_t = -1
-	
-	for i in range(1, len(positions)):
-		delta_t = timestamps[i] - timestamps[i - 1]
-		distance = util.calculate_vector_length(positions[i] - positions[i - 1])
-		distances.append(distance)
-		delta_ts.append(delta_t)
-		if distance > max_dist:
-			max_dist = distance 
-			max_delta_t = delta_t
-			max_dist_idx = i
-	print("max dist:", max_dist, "delta_t of max_dist:", max_delta_t, "speed:", max_dist / max_delta_t, "max dist idx:", max_dist_idx, "out of", len(timestamps))
-	
-	speeds = np.array(distances) / np.array(delta_ts)
-	# print("Min distance:", np.min(distances))
-	# print("Max distance:", np.max(distances))
-	# print("Min delta_t:", np.min(delta_ts))
-	# print("Max delta_t:", np.max(delta_ts))
-	# print("Min speed:", np.min(speeds))
-	# print("Max speed:", np.max(speeds))
-	df = pd.DataFrame([speeds, distances, delta_ts])
-	df = df.T 
-	df.columns=["Speed", "Distance", "Delta t"]
-	#df.to_csv("speeds.csv", index=False)
-	#util.plot_histogram(speeds, "Speed (m/s)", "PDF", None, None, line=False, color=None, show=True, marker=None, cumul=False, bins=50)
-	return df 
-
-def average_df_into_intervals(df, time_interval):
-	def helper(df):
-		data = {col: [] for col in df.columns}
-		for i, r in df.iterrows():
-			for col in data:
-				if r[col] != "nil" and not np.isnan(r[col]):
-					data[col].append(r[col])
-	df = df.sort_values("Timestamp")
-
-	i = 0
-	while i < len(df):
-		temp_dist = {}
-		start_idx = curr_idx = i
-		record = []
-		while curr_idx < len(df) and (df.loc[curr_idx, "Timestamp"] - df.loc[start_idx, "Timestamp"]) < time_interval:
-			curr_idx += 1
-		i += 1
-
 def load_iphone_data(
 	dir_name, 
 	shop_locations, 
 	true_paths, 
 	by_measured,
-	drop_risky_measured_azimuths=True, 
-	drop_risky_true_azimuths=True, 
-	drop_risky_elevations=True, 
-	drop_risky_true_distances=True,
-	check_vectors_for_sanity=True, 
-	check_abrupt_angle_changes=True,
 	start=None,
 	finish=None,
 	cache_paths_on_disk=True,
@@ -449,14 +324,7 @@ def load_iphone_data(
 					# calculate unfiltered positions (with nil angles)
 					unfiltered_df = iphone_data_to_coordinates(
 						device_df,
-						shop_locations[shop_id], 
-						check_vectors_for_sanity=False,
-						check_abrupt_angle_changes=False,
-						drop_risky_measured_azimuths=False,
-						drop_risky_true_azimuths=False,
-						drop_risky_elevations=False,
-						drop_risky_true_distances=False,
-						filter_invalid_angles=False
+						shop_locations[shop_id]
 					)
 					unfiltered_df = unfiltered_df.reset_index(drop=True)
 
@@ -950,7 +818,6 @@ def evaluate_motion_errors(iphone_paths, true_paths, shop_locations, methods, di
 				fused_azimuth_diffs = {azimuth_fusion_method: util.azimuth_error(true_motion_azimuths, fused_azimuths[azimuth_fusion_method]) for azimuth_fusion_method in fused_azimuths}
 				fused_azimuth_diffs = {azimuth_fusion_method: fused_azimuth_diffs[azimuth_fusion_method][~np.isnan(fused_azimuth_diffs[azimuth_fusion_method])] for azimuth_fusion_method in fused_azimuth_diffs}
 				for azimuth_fusion_method in fused_azimuth_diffs:
-					#print(method, azimuth_fusion_method, path_id, shop_id, "number of fused diffs:", len(fused_azimuth_diffs[azimuth_fusion_method]))
 					if len(fused_azimuth_diffs[azimuth_fusion_method]) > 0:
 						if azimuth_fusion_method not in fused_azimuth_errors[method]:
 							fused_azimuth_errors[method][azimuth_fusion_method] = []
@@ -1042,13 +909,6 @@ def evaluate_motion_errors(iphone_paths, true_paths, shop_locations, methods, di
 								direction_errors[method + f" ({azimuth_fusion_method})"] = {dir: [] for dir in dir_strs}
 							direction_errors[method + f" ({azimuth_fusion_method})"][dir_str].append(fd == true_motion_directions[dir_nan_mask])
 							
-					# dir_nan_mask = dir_mask & ~np.isnan(uwb_to_motion_directions)
-					# umd = uwb_to_motion_directions[dir_nan_mask]
-					# if len(umd) > 0:
-					# 	if "uwb" not in direction_errors:
-					# 		direction_errors["uwb"] = {dir: [] for dir in dir_strs}
-					# 	direction_errors["uwb"][dir_str].append(umd == true_motion_directions[dir_nan_mask])
-
 				dir_mask = true_uwb_directions == d 
 				dir_nan_mask = dir_mask & ~np.isnan(uwb_directions)
 				ud = uwb_directions[dir_nan_mask]
@@ -1106,32 +966,16 @@ def evaluate_motion_errors(iphone_paths, true_paths, shop_locations, methods, di
 		distance_errors[method] = np.concatenate(distance_errors[method], axis=0)
 		_error_sequences[(method, 'distance')] = distance_errors[method].copy()
 		distance_errors[method] = pd.DataFrame(distance_errors[method], columns=[f"Distance error ({method})"])
-		# print("Distance error statistics for method:", method)
-		# print(distance_errors[method].describe())
 		distance_df = distance_errors[method].describe(percentiles=[.75, .9]) 
 		stats_dfs.append(distance_df)
 		
-		# plt.hist(distance_errors[method], bins=30)
-		# plt.xlabel("Distance error (m)")
-		# plt.ylabel("Frequency")
-		# plt.title(f"Distance error distribution ({method})")
-		# plt.show()
-
 		if len(position_errors[method]) == 0:
 			continue
 		position_errors[method] = np.concatenate(position_errors[method], axis=0)
 		_error_sequences[(method, 'position')] = position_errors[method].copy()
 		position_errors[method] = pd.DataFrame(position_errors[method], columns=[f"Position error ({method})"])
-		# print("Position error statistics for method:", method)
-		# print(position_errors[method].describe())
 		position_df = position_errors[method].describe(percentiles=[.75, .9])
 		stats_dfs.append(position_df)
-
-		# plt.hist(position_errors[method], bins=30)
-		# plt.xlabel("Position error (m)")
-		# plt.ylabel("Frequency")
-		# plt.title(f"Position error distribution ({method})")
-		# plt.show()
 
 		if len(motion_azimuth_errors[method]) == 0:
 			continue
@@ -1139,10 +983,6 @@ def evaluate_motion_errors(iphone_paths, true_paths, shop_locations, methods, di
 		_error_sequences[(method, 'azimuth')] = motion_azimuth_errors[method].copy()
 		motion_azimuth_errors[method] = pd.DataFrame(motion_azimuth_errors[method], columns=[f"Method azimuth error ({method})"])
 		
-		# if method == "ekf":
-		# 	print(motion_azimuth_errors[method])
-		# 	print("Azimuth error statistics for method:", method)
-		# 	print(motion_azimuth_errors[method].describe())
 		azimuth_df = motion_azimuth_errors[method].describe(percentiles=[.75, .9])
 		stats_dfs.append(azimuth_df)
 
@@ -1168,15 +1008,6 @@ def evaluate_motion_errors(iphone_paths, true_paths, shop_locations, methods, di
 		uwb_to_motion_azimuth_errors = pd.DataFrame(uwb_to_motion_azimuth_errors, columns=[f"UWB to motion azimuth error"])
 		uwb_to_motion_azimuth_df = uwb_to_motion_azimuth_errors.describe(percentiles=[.75, .9])
 		stats_dfs.append(uwb_to_motion_azimuth_df)
-		#print(method, "mean azimuth error:", np.mean(np.abs(azimuth_errors[method])), "median azimuth error:", np.median(np.abs(azimuth_errors[method])), "max azimuth error:", np.max(np.abs(azimuth_errors[method])))
-		# plt.hist(azimuth_errors[method], bins=30)
-		# plt.xlabel("Azimuth error (degrees)")
-		# plt.ylabel("Frequency")
-		# plt.title(f"Azimuth error distribution ({method})")
-		# plt.show()
-
-		#print("fused direction errors:", fused_direction_errors["ekf"])
-		# direction accuracy 
 	
 	for method in inference_times:
 		inference_times[method] = np.mean(inference_times[method])
@@ -1201,10 +1032,6 @@ def evaluate_motion_errors(iphone_paths, true_paths, shop_locations, methods, di
 		stats_dfs.append(direction_errors_df)
 
 		direction_errors[method]['average'] = np.mean(temp) * 100
-
-		# fused_direction_errors[method][dir_str] = np.mean(np.concatenate(fused_direction_errors[method][dir_str], axis=0)) * 100
-		# #print("Direction accuracy for", dir_str, "for method", method, ":", direction_errors[method][dir_str])
-		# uwb_direction_errors[method][dir_str] = np.mean(np.concatenate(uwb_direction_errors[method][dir_str], axis=0)) * 100
 	
 	dir_strs.append("average")
 	dir_accs = {method.capitalize().replace("Ekf", "EKF").replace("Uwb", "UWB"): [direction_errors[method][dir_str] for dir_str in dir_strs] for method in direction_errors.keys()}
@@ -1538,470 +1365,9 @@ def save_shops(shop_locations, shops_filename):
 	df.columns = ["X", "Y", "Shop"]
 	df.to_csv(shops_filename, index=False)
 
-def load_shops(shops_filename):
-	df = pd.read_csv(shops_filename)
-	shops = {}
-	for i, r in df.iterrows():
-		shops[r["Shop"]] = np.array([r["X"], r["Y"]])
-	return shops 
 
-def azimuth2direction(iphone_paths, time_interval, shop_locations):			
-	correct_directions = num_intervals = num_shops_detected = all_possible_shops = 0
-	angle_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
-	distance_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
-	direction_counts = {"front": {"correct": 0, "total": 0}, "back": {"correct": 0, "total": 0}, "left": {"correct": 0, "total": 0}, "right": {"correct": 0, "total": 0}}
-	vector_errors = []
-	vector_errors2 = []
-	broken_count = total_broken_count = 0
-	for path_id in iphone_paths:
-		# average all devices
-		#for shop_id in iphone_paths[path_id]:
-		if "consolidated" not in iphone_paths[path_id]:
-			consolidate_shop_measurements_by_timestamp(iphone_paths, "unfiltered")
-			consolidate_shop_measurements_by_timestamp(iphone_paths, "filtered")
-		for data_type in iphone_paths[path_id]["consolidated"]:
-			data = iphone_paths[path_id]["consolidated"][data_type] # it's an array of dicts
-			
-			if len(data) > 0 and data_type == "unfiltered":
-				i = 0
-				while i < len(data):
-					temp_dist = {}
-					start_idx = curr_idx = i
-					while curr_idx < len(data) and (data[curr_idx]["timestamp"] - data[start_idx]["timestamp"]) < time_interval:
-						curr_shop_id = data[curr_idx]["shop"]#data[curr_ts]["shop"]
-						if curr_shop_id not in temp_dist:
-							temp_dist[curr_shop_id] = {"distance": [], "azimuth": [], "actual azimuth": [], "actual distance": [], "compass value": [], "actual compass value": [], "actual orientation": [], "actual position": [], "timestamp": [], "actual timestamp": []}
-						
-						temp_dist[curr_shop_id]["distance"].append(data[curr_idx]["distance"])
-						temp_dist[curr_shop_id]["actual distance"].append(data[curr_idx]["actual distance"])
-						temp_dist[curr_shop_id]["actual azimuth"].append(data[curr_idx]["actual azimuth"])
-						# temp_dist[curr_shop_id]["compass value"].append(data[curr_idx]["compass value"])
-						# temp_dist[curr_shop_id]["actual compass value"].append(data[curr_idx]["actual compass value"])
-						temp_dist[curr_shop_id]["actual orientation"].append(data[curr_idx]["actual orientation"])
-						temp_dist[curr_shop_id]["actual position"].append(data[curr_idx]["actual position"])
-						temp_dist[curr_shop_id]["timestamp"].append(data[curr_idx]["timestamp"])
-						temp_dist[curr_shop_id]["actual timestamp"].append(data[curr_idx]["actual timestamp"])
-						if data[curr_idx]["azimuth"] != "nil" and not np.isnan(data[curr_idx]["azimuth"]):
-							temp_dist[curr_shop_id]["azimuth"].append(data[curr_idx]["azimuth"])
-							
-						curr_idx += 1
-						#print("curr_idx:", curr_idx)
-					
-					assert temp_dist[curr_shop_id]["timestamp"][-1] - temp_dist[curr_shop_id]["timestamp"][0] <= time_interval
-
-					angles = distances = 0
-					for curr_shop_id in temp_dist:
-						temp = np.array(temp_dist[curr_shop_id]["azimuth"])
-						# if temp.dtype != np.float32:
-						# 	print(temp.dtype, path_id)
-						assert (temp.dtype == np.float32) or (temp.dtype == np.float64)
-						temp = temp[temp != util.DUMMY]
-						temp_dist[curr_shop_id]["azimuth"] = temp[~np.isnan(temp)]
-
-						if len(temp_dist[curr_shop_id]["azimuth"]) > 0:
-							#for key in temp_dist[curr_shop_id]:
-
-							#print("nan angles:", len(temp[np.isnan(temp)]))
-							curr_dist = np.array(temp_dist[curr_shop_id]["distance"]).mean(axis=0)
-							curr_ori_theta = np.array(temp_dist[curr_shop_id]["actual orientation"]).mean(axis=0)
-							#_val = np.array(temp_dist[curr_shop_id]["compass value"]).mean(axis=0)
-							curr_azimuth = np.array(temp_dist[curr_shop_id]["azimuth"]).mean()
-							curr_act_dist = np.array(temp_dist[curr_shop_id]["actual distance"]).mean(axis=0)
-							#curr_act_compass_val = np.array(temp_dist[curr_shop_id]["actual compass value"]).mean(axis=0)
-							curr_act_azimuth = np.array(temp_dist[curr_shop_id]["actual azimuth"]).mean(axis=0)
-							# measured_pos = util.calculate_position(curr_compass_val, curr_azimuth, curr_dist)
-							# measured_pos_with_act_ori = util.calculate_position(curr_act_compass_val, curr_azimuth, curr_dist)
-							# actual_pos = util.calculate_position(curr_act_compass_val, curr_act_azimuth, curr_act_dist)
-							# vector_errors.append(util.calculate_distance_between_vectors(measured_pos.reshape(-1, 1), actual_pos.reshape(-1, 1)))
-							# vector_errors2.append(util.calculate_distance_between_vectors(measured_pos_with_act_ori.reshape(-1, 1), actual_pos.reshape(-1, 1)))
-							
-							util.discretize_azimuths(curr_azimuth, curr_act_azimuth, direction_counts)
-							# calculate the shop's position from the phone's perspective
-							all_azimuths = util.get_azimuths_to_other_shops(np.degrees(curr_ori_theta), curr_dist, curr_azimuth, shop_locations, curr_shop_id)
-							all_act_azimuths = util.get_azimuths_to_other_shops(np.degrees(curr_ori_theta), curr_act_dist, curr_act_azimuth, shop_locations, curr_shop_id)
-							
-							# if abs(all_azimuths[curr_shop_id] - curr_azimuth) > 1e-3:
-							# 	print(all_azimuths[curr_shop_id], curr_azimuth)
-							# assert abs(all_azimuths[curr_shop_id] - curr_azimuth) < 1e-3
-
-							# broken = False 	
-							# for other_shop_id in all_azimuths:
-							# 	#correct_directions += helper(all_azimuths[other_shop_id], all_act_azimuths[other_shop_id])
-							# 	all_possible_shops += 1
-							
-							# 	# if i == 0:
-							# 	# 	if curr_shop_id == other_shop_id:
-							# 	# 		print("measured azimuth:", all_azimuths[curr_shop_id], "actual azimuth:", all_act_azimuths[curr_shop_id])
-									
-							# 	if other_shop_id in temp_dist:
-							# 		if abs(all_act_azimuths[other_shop_id] - np.array(temp_dist[other_shop_id]["actual azimuth"]).mean()) > 6:#1e-3:
-							# 			print("source shop:", curr_shop_id, "actual azimuth of source shop:", curr_act_azimuth, "actual distance of source shop:", curr_act_dist, other_shop_id, "transformed azimuth:", all_act_azimuths[other_shop_id], "actual azimuth:", np.array(temp_dist[other_shop_id]["actual azimuth"]).mean(), "actual distance:", np.array(temp_dist[other_shop_id]["actual distance"]).mean(), "timestamp:", np.array(temp_dist[other_shop_id]["timestamp"]).mean(), "actual timestamp:", np.array(temp_dist[other_shop_id]["actual timestamp"]).mean())
-							# 			print("all averaged azimuths of this shop:", np.array(temp_dist[curr_shop_id]["actual azimuth"]))
-							# 			print("all averaged orientations of this shop:", np.array(temp_dist[curr_shop_id]["actual orientation"]))
-							# 			print("all averaged azimuths of other shop:", np.array(temp_dist[other_shop_id]["actual azimuth"]))
-							# 			print("all averaged orientations of other shop:", np.array(temp_dist[other_shop_id]["actual orientation"]))
-							# 			broken = True 
-							# 			broken_count += 1
-							# 			act_pos = np.array(temp_dist[other_shop_id]["actual position"]).mean(axis=0)
-							# 			act_ori = np.array(temp_dist[other_shop_id]["actual orientation"]).mean()
-							# 			for temp_shop in shop_locations:
-							# 				plt.scatter(shop_locations[temp_shop][0], shop_locations[temp_shop][1], color="red")
-							# 				plt.annotate(temp_shop + " (a)", shop_locations[temp_shop], color="red")
-										
-							# 			plt.scatter(act_pos[0], act_pos[1], color="green")
-							# 			plt.quiver(act_pos[0], act_pos[1], np.cos(act_ori), np.sin(act_ori), color="green")
-							# 			plt.annotate("T", (act_pos[0], act_pos[1]), color="green")
-										
-							# 			ta = util.get_vector(curr_act_dist, 90 - curr_act_azimuth - util.theta_to_bearing(np.degrees(curr_ori_theta)))
-							# 			print("orientation:", np.degrees(curr_ori_theta), "azimuth:", curr_act_azimuth, "bearing:", util.theta_to_bearing(np.degrees(curr_ori_theta)))
-							# 			plt.quiver(act_pos[0], act_pos[1], ta[0], ta[1], color="purple")
-							# 		# 	#plt.legend()
-									
-							# 		total_broken_count += 1 # unindent later
-							# if broken:
-							# 	plt.show()
-							# 	plt.show()
-							# if i == 0:
-							# 	plt.legend()
-							# 	plt.show()
-							angles += 1
-
-						if len(temp_dist[curr_shop_id]["distance"]) > 0:
-							distances += 1
-						
-						num_shops_detected += 1
-					
-					if angles > 0:
-						angle_counts[angles] += 1
-					
-					if distances > 0:
-						distance_counts[distances] += 1
-					num_intervals += 1
-					i += 100
-					#print("i:", i, "len data:", len(data))
-	
-	print("Number of intervals:", num_intervals, "num shops detected:", num_shops_detected, "angle counts:", angle_counts, "distance counts:", distance_counts, "all possible shops:", all_possible_shops, "correct dirs:", correct_directions, "broken:", broken_count, "total broken count:", total_broken_count)#, "%:", 100 * correct_directions / num_intervals)
-	
-	print("direction counts:", direction_counts)
-	distance_counts = np.array([(k, v) for (k, v) in distance_counts.items()])
-	angle_counts = np.array([(k, v) for (k, v) in angle_counts.items()])
-	angle_counts = pd.DataFrame(angle_counts, columns=["Number of chips", "Frequency"])
-	angle_counts["Type"] = "Angle"
-	distance_counts = pd.DataFrame(distance_counts, columns=["Number of chips", "Frequency"])
-	distance_counts["Type"] = "Distance"
-	
-	counts = pd.concat([angle_counts, distance_counts], axis=0)
-	percents = {"Distance": {}, "Angle": {}}
-	for num_chips in counts["Number of chips"].unique():
-		for feat in ["Distance", "Angle"]:
-			percents[feat][num_chips] = 100 * counts.loc[(counts["Number of chips"] == num_chips) & (counts["Type"] == feat), "Frequency"].values / counts["Frequency"].sum()
-	
-	print(percents)
-	for feat in percents:
-		temp = percents[feat]
-		temp = np.array(list(temp.items()))
-		print(temp)
-		labels = [f"{temp[i, 0]} {'sensor' if temp[i, 0] == 1 else 'sensors'} ({round(temp[i, 1][0], 1)}%)" for i in range(len(temp))]
-		plt.pie(temp[:, 1], labels=labels, colors=sns.color_palette('viridis'))
-		plt.show()
-
-	direction_counts = np.array([(k, round(100 * v["correct"] / v["total"], 2)) for k, v in direction_counts.items()])
-	direction_counts = pd.DataFrame(direction_counts, columns=["Direction", "Accuracy"])
-	sns.barplot(x=direction_counts["Direction"], y=direction_counts["Accuracy"], palette="cool")
-	plt.ylabel("Accuracy (%)")
-	plt.xlabel("Direction")
-	plt.show()
-
-def dist_angle_dist(iphone_paths, cumul, bins):
-	distances = []
-	azimuths = []
-	unfiltered_num_records = filtered_num_records = 0
-	for path_id in iphone_paths:
-		for method in iphone_paths[path_id]:
-			if method[0] != "S":
-				continue 
-			
-			if "filtered" in iphone_paths[path_id][method]:
-				distances.append(iphone_paths[path_id][method]["filtered"]["time-aligned actual distances"])
-				azimuths.append(iphone_paths[path_id][method]["filtered"]["time-aligned actual azimuths"])
-				
-				#unfiltered_num_records += len(distances)
-				filtered_num_records += len(iphone_paths[path_id][method]["filtered"]["time-aligned actual azimuths"])
-	distances = np.concatenate(distances, axis=0)
-	azimuths = np.concatenate(azimuths, axis=0)
-
-	print("min distance:", np.min(distances), "max distance:", np.max(distances))
-	print("min angle:", np.min(azimuths), "max angle:", np.max(azimuths))
-	print("number of filtered records:", filtered_num_records)
-	util.plot_histogram(distances, "Distance to anchors (m)", "CDF" if cumul else "Density", label=None, ax=None, line=False, color=None, show=True, marker=None, cumul=cumul, bins=bins)
-	util.plot_histogram(azimuths, "Relative angle to anchors (degrees)", "CDF" if cumul else "Density", label=None, ax=None, line=False, color=None, show=True, marker=None, cumul=cumul, bins=bins)
-
-def generate_vectors(iphone_paths, time_interval, shop_locations):
-	def update_direction_counts(measured_azimuth, actual_azimuth, direction_counts):
-		#correct_directions = 0
-		if actual_azimuth > 90:
-			if measured_azimuth > 90:
-				direction_counts["back"]["correct"] += 1
-			direction_counts["back"]["total"] += 1
-		elif actual_azimuth < -90:
-			if measured_azimuth < -90:
-				direction_counts["back"]["correct"] += 1
-			direction_counts["back"]["total"] += 1
-		elif actual_azimuth > 10 and actual_azimuth < 90:
-			if measured_azimuth > 10 and measured_azimuth < 90:
-				direction_counts["right"]["correct"] += 1
-			direction_counts["right"]["total"] += 1
-		elif actual_azimuth < -10 and actual_azimuth > -90:
-			if measured_azimuth < -10 and measured_azimuth > -90:
-				direction_counts["left"]["correct"] += 1
-			direction_counts["left"]["total"] += 1
-		elif actual_azimuth > -10 and actual_azimuth < 10:
-			if measured_azimuth > -10 and measured_azimuth < 10:
-				direction_counts["front"]["correct"] += 1
-			direction_counts["front"]["total"] += 1
-	
-	def generate(curr_shop_id, distance, azimuth, orientation, shop_locations, true_pos):
-		vectors = {}
-		# construct the vectors first 
-		ta = util.get_vector(distance, 90 - azimuth - util.theta_to_bearing(np.degrees(orientation)))
-		target_ori_vector = util.get_vector(1, np.degrees(orientation))
-		ot = shop_locations[curr_shop_id] - ta
-		vectors["O"] = {"T": ot}
-		vectors["T"] = {curr_shop_id: ta, "O": -ot}
-		vectors[curr_shop_id] = {"T": -ta}
-		
-		for other_shop_id in shop_locations:
-			ta_i = shop_locations[other_shop_id] - ot
-			vectors["T"][other_shop_id] = ta_i 
-			vectors[other_shop_id] = {"T": -ta_i}
-			vectors["O"][other_shop_id] = shop_locations[other_shop_id]
-			vectors[other_shop_id]["O"] = -shop_locations[other_shop_id]
-
-		for s1 in shop_locations:
-			for s2 in shop_locations:
-				if s1 == s2:
-					continue 
-				vectors[s1][s2] = vectors["O"][s2] - vectors["O"][s1]
-				vectors[s2][s1] = vectors["O"][s1] - vectors["O"][s2]
-		# generate vectors 
-		generated_vectors = {}
-		for p1 in vectors:
-			for p2 in vectors:
-				if p1 == p2:
-					continue 
-				if p1 not in generated_vectors:
-					generated_vectors[p1] = {}
-				if p2 not in generated_vectors[p1]:
-					generated_vectors[p1][p2] = [vectors[p1][p2]]
-
-				for p3 in vectors:
-					if p2 == p3 or p1 == p3:
-						continue
-					
-					for p4 in vectors:
-						if p3 == p4 or p1 == p4 or p2 == p4:
-							continue
-						if p3 in vectors[p1] and p4 in vectors[p3] and p2 in vectors[p4]:
-							
-							generated_vectors[p1][p2].append(vectors[p1][p3] + vectors[p3][p4] + vectors[p4][p2])
-
-				# if p1 == "O":
-				# 	print(p2)
-				# if p1 == "O" and p2 == "T":
-				# 	print(p1, p2)
-				# 	print("measured vector:", vectors[p1][p2])
-				# 	print("generated vectors:", np.array(generated_vectors[p1][p2]))
-				# 	print("=>", np.array(generated_vectors[p1][p2]).mean(axis=0))
-					
-		for p1 in generated_vectors:
-			for p2 in generated_vectors[p1]:
-				generated_vectors[p1][p2] = np.array(generated_vectors[p1][p2]).mean(axis=0)
-		
-		# get azimuths 
-		azimuths = {}
-		for shop_id in shop_locations:
-			val = util.calculate_azimuths(target_ori_vector.reshape(1, 2), np.array(generated_vectors["T"][shop_id]).reshape(1, 2))
-			azimuths[shop_id] = val[0]
-		
-		shop_ids = list(shop_locations.keys())
-		coords = [shop_locations[shop_id] for shop_id in shop_ids]
-		coords.append(ot)
-		shop_ids.append("T")
-		mv, gv = np.zeros((len(coords), len(coords), 2)), np.zeros((len(coords), len(coords), 2))
-		
-		for i in range(len(shop_ids)):
-			for j in range(len(shop_ids)):
-				s1 = shop_ids[i]
-				s2 = shop_ids[j]
-				if i != j:
-					#print(generated_vectors[s1][s2])
-					mv[i][j] = vectors[s1][s2]
-					gv[i][j] = generated_vectors[s1][s2]
-
-		# plt.scatter(true_pos[0], true_pos[1], color="green")
-		# plt.scatter(ot[0], ot[1], color="blue")
-		# plt.annotate("T (a)", true_pos, color="green")
-		# plt.annotate("T (m)", ot, color="blue")
-		# util.draw_vectors(np.array(coords), mv, "Measured", show=True)
-		# plt.scatter(true_pos[0], true_pos[1], color="green")
-		# plt.scatter(ot[0], ot[1], color="blue")
-		# plt.annotate("T (a)", true_pos, color="green")
-		# plt.annotate("T (m)", ot, color="blue")
-		# util.draw_vectors(np.array(coords), gv, "Generated", show=True)
-		
-		return azimuths 
-	
-	direction_counts = {"front": {"correct": 0, "total": 0}, "back": {"correct": 0, "total": 0}, "left": {"correct": 0, "total": 0}, "right": {"correct": 0, "total": 0}}
-	other_direction_counts = {"front": {"correct": 0, "total": 0}, "back": {"correct": 0, "total": 0}, "left": {"correct": 0, "total": 0}, "right": {"correct": 0, "total": 0}}
-	#gen_direction_counts = {"front": {"correct": 0, "total": 0}, "back": {"correct": 0, "total": 0}, "left": {"correct": 0, "total": 0}, "right": {"correct": 0, "total": 0}}
-							
-	for path_id in iphone_paths:
-		# average all devices
-		#for shop_id in iphone_paths[path_id]:
-		if "consolidated" not in iphone_paths[path_id]:
-			consolidate_shop_measurements_by_timestamp(iphone_paths, "unfiltered")
-			
-		data = iphone_paths[path_id]["consolidated"]["unfiltered"] # it's an array of dicts
-		
-		if len(data) == 0:
-			continue
-		
-		i = 0
-		while i < len(data):
-			temp_dist = {}
-			start_idx = curr_idx = i
-			while curr_idx < len(data) and (data[curr_idx]["timestamp"] - data[start_idx]["timestamp"]) < time_interval:
-				curr_shop_id = data[curr_idx]["shop"]#data[curr_ts]["shop"]
-				if curr_shop_id not in temp_dist:
-					temp_dist[curr_shop_id] = {"distance": [], "azimuth": [], "actual azimuth": [], "actual distance": [], "compass value": [], "actual compass value": [], "actual orientation": [], "actual position": [], "timestamp": [], "actual timestamp": []}
-				
-				temp_dist[curr_shop_id]["distance"].append(data[curr_idx]["distance"])
-				temp_dist[curr_shop_id]["actual distance"].append(data[curr_idx]["actual distance"])
-				temp_dist[curr_shop_id]["actual azimuth"].append(data[curr_idx]["actual azimuth"])
-				# temp_dist[curr_shop_id]["compass value"].append(data[curr_idx]["compass value"])
-				# temp_dist[curr_shop_id]["actual compass value"].append(data[curr_idx]["actual compass value"])
-				temp_dist[curr_shop_id]["actual orientation"].append(data[curr_idx]["actual orientation"])
-				temp_dist[curr_shop_id]["actual position"].append(data[curr_idx]["actual position"])
-				temp_dist[curr_shop_id]["timestamp"].append(data[curr_idx]["timestamp"])
-				temp_dist[curr_shop_id]["actual timestamp"].append(data[curr_idx]["actual timestamp"])
-				if data[curr_idx]["azimuth"] != "nil" and not np.isnan(data[curr_idx]["azimuth"]):
-					temp_dist[curr_shop_id]["azimuth"].append(data[curr_idx]["azimuth"])
-					
-				curr_idx += 1
-				#print("curr_idx:", curr_idx)
-			
-			assert temp_dist[curr_shop_id]["timestamp"][-1] - temp_dist[curr_shop_id]["timestamp"][0] <= time_interval
-
-			for curr_shop_id in temp_dist:
-				temp = np.array(temp_dist[curr_shop_id]["azimuth"])
-				
-				assert (temp.dtype == np.float32) or (temp.dtype == np.float64)
-				temp = temp[temp != util.DUMMY]
-				temp_dist[curr_shop_id]["azimuth"] = temp[~np.isnan(temp)]
-
-				if len(temp_dist[curr_shop_id]["azimuth"]) > 0:
-					curr_dist = np.array(temp_dist[curr_shop_id]["distance"]).mean(axis=0)
-					curr_ori_theta = np.array(temp_dist[curr_shop_id]["actual orientation"]).mean(axis=0)
-					#curr_compass_val = np.array(temp_dist[curr_shop_id]["compass value"]).mean(axis=0)
-					curr_azimuth = np.array(temp_dist[curr_shop_id]["azimuth"]).mean()
-					curr_act_dist = np.array(temp_dist[curr_shop_id]["actual distance"]).mean(axis=0)
-					#curr_act_compass_val = np.array(temp_dist[curr_shop_id]["actual compass value"]).mean(axis=0)
-					curr_act_azimuth = np.array(temp_dist[curr_shop_id]["actual azimuth"]).mean(axis=0)
-					#actual_pos = util.calculate_position(curr_act_compass_val, curr_act_azimuth, curr_act_dist)
-					
-					#helper(curr_azimuth, curr_act_azimuth, direction_counts)
-					# calculate the shop's position from the phone's perspective
-					all_azimuths = util.get_azimuths_to_other_shops(np.degrees(curr_ori_theta), curr_dist, curr_azimuth, shop_locations, curr_shop_id)
-					all_act_azimuths = util.get_azimuths_to_other_shops(np.degrees(curr_ori_theta), curr_act_dist, curr_act_azimuth, shop_locations, curr_shop_id)
-					assert curr_shop_id in all_azimuths
-
-					for other_shop_id in all_azimuths:
-						if other_shop_id == curr_shop_id:
-							update_direction_counts(all_azimuths[other_shop_id], all_act_azimuths[other_shop_id], direction_counts)
-						else:
-							update_direction_counts(all_azimuths[other_shop_id], all_act_azimuths[other_shop_id], other_direction_counts)
-					
-					# gen_azimuths = generate(curr_shop_id, curr_dist, curr_azimuth, curr_ori_theta, shop_locations, actual_pos)
-					# for other_shop_id in gen_azimuths:
-					# 	update_direction_counts(gen_azimuths[other_shop_id], all_act_azimuths[other_shop_id], gen_direction_counts)
-					
-			i += 100
-			
-	print("direction counts:", direction_counts)
-	print("generated direction counts:", other_direction_counts)
-	
-	direction_counts = np.array([(k, round(100 * v["correct"] / v["total"], 2)) for k, v in direction_counts.items()])
-	direction_counts = pd.DataFrame(direction_counts, columns=["Direction", "Accuracy"])
-	direction_counts["Type"] = "Measured"
-	other_direction_counts = np.array([(k, round(100 * v["correct"] / v["total"], 2)) for k, v in other_direction_counts.items()])
-	other_direction_counts = pd.DataFrame(other_direction_counts, columns=["Direction", "Accuracy"])
-	other_direction_counts["Type"] = "Generated"
-	counts = pd.concat([direction_counts, other_direction_counts], axis=0).reset_index(drop=True)
-	counts["Accuracy"] = counts["Accuracy"].astype(float)
-	sns.barplot(x=counts["Direction"], y=counts["Accuracy"], hue=counts["Type"])
-	plt.ylabel("Accuracy (%)")
-	plt.xlabel("Direction")
-	plt.show()
-
-def fill_nil_azimuths(df):
-	df = df.copy().reset_index()
-	shift = 1
-	curr_az, curr_ts = None, None  
-	for i in range(1, df.shape[0]):
-		# if i == len(df) - shift:
-		#     break
-		prev, curr = df.iloc[max(i - shift, 0), :], df.iloc[i, :]
-		if curr["Azimuth"] == util.DUMMY:
-			if prev["Azimuth"] != util.DUMMY:
-				curr_az, curr_ts = prev["Azimuth"], prev["Timestamp"]
-			elif curr_az != None and curr["Timestamp"] - curr_ts < 5:
-				df.loc[i, "Azimuth"] = curr_az
-	return df["Azimuth"]
-
-def filter_iphone_measurements(df, drop_risky_measured_azimuths, drop_risky_true_azimuths, drop_risky_true_distances, fill_nill=False, drop_risky_elevations=True):
-	# filter the df 
-	df["Azimuth"] = azimuths2float(df["Azimuth"])
-
-	if fill_nill:
-		df["Azimuth"] = fill_nil_azimuths(df)
-		#print("after fill nill:", df["Azimuth"])
-
-	df = df[df["Azimuth"] != util.DUMMY]
-	if (util.DUMMY in df["Azimuth"]):
-		print(df["Azimuth"].sort_values())
-
-	if drop_risky_measured_azimuths:
-		df = df[abs(df["Azimuth"]) <= constants.RISKY_AZIMUTH_THRESHOLD]
-	
-	if drop_risky_true_azimuths:
-		df = df[abs(df["Actual Azimuth"]) <= constants.RISKY_AZIMUTH_THRESHOLD]
-	
-	if drop_risky_true_distances:
-		df = df[abs(df["Distance"] - df["Actual Distance"]) < constants.RISKY_DISTANCE_THRESHOLD]
-
-	if drop_risky_elevations:
-		to_del = []
-		for i, r in df.iterrows():
-			if r["Elevation"] == "nil" or float(r["Elevation"]) > constants.RISKY_ELEVATION_THRESHOLD:
-				to_del.append(i)
-			
-		df = df.drop(to_del)
-	return df 
-
-def iphone_data_to_coordinates(
-		original_df, 
-		shop_location, 
-		check_vectors_for_sanity, 
-		check_abrupt_angle_changes, 
-		filter_invalid_angles, 
-		drop_risky_measured_azimuths, 
-		drop_risky_true_azimuths, 
-		drop_risky_elevations,
-		drop_risky_true_distances
-	):
+def iphone_data_to_coordinates(original_df, shop_location):
 	df = original_df.copy()
-	if filter_invalid_angles:
-		df = filter_iphone_measurements(df, drop_risky_measured_azimuths=drop_risky_measured_azimuths, drop_risky_true_azimuths=drop_risky_true_azimuths, drop_risky_true_distances=drop_risky_true_distances, drop_risky_elevations=drop_risky_elevations)
 	df["DeviceTheta"] = util.bearing_to_theta(df["DeviceBearing"].values).astype(float)
 	df["DeviceOrientationX"] = np.cos(util.degrees2radians(df["DeviceTheta"]))
 	df["DeviceOrientationY"] = np.sin(util.degrees2radians(df["DeviceTheta"]))
@@ -2013,13 +1379,6 @@ def iphone_data_to_coordinates(
 
 	# drop vectors that are out of the device's range
 	df["DeviceOrientation_TA_Angle"] = util.calculate_angles_between_vectors(df.loc[:, ["DeviceOrientationX", "DeviceOrientationY"]].values, df.loc[:, ["TA_X", "TA_Y"]].values)
-
-	if check_vectors_for_sanity:
-		df = df[df["DeviceOrientation_TA_Angle"] <= constants.MAX_ORIENTATION_TA_ANGLE].reset_index(drop=True)
-		df = util.check_vector_sanity(df)
-
-	if check_abrupt_angle_changes:
-		df = util.drop_vectors_after_max(df)
 
 	df["X"] = shop_location[0] - df["TA_X"]
 	df["Y"] = shop_location[1] - df["TA_Y"]
@@ -2034,15 +1393,10 @@ def trilateration(a, d, max_num_anchors):
 	anchors = []
 	shop_ids = sorted(list(d.keys()))
 	
-	is_batch2 = False 
 	for shop_id in shop_ids[:min(max_num_anchors, len(d))]:
 		distances.append(d[shop_id])
 		anchors.append(a[shop_id])
-		if "-2" in shop_id:
-			is_batch2 = True
 
-	if len(d) > 6:
-		print("!!!!!FOUND MORE THAN 6 ANCHORS!!!!!", len(d), shop_ids)
 	# Prepare the system of equations
 	A = []
 	b = []
@@ -2081,7 +1435,7 @@ def dilateration(md1, md2, ma1, ma2, shop1_coords, shop2_coords, verbose=False):
 			
 	if len(intersections) == 0:
 		if verbose:
-			print("!!!!!!! -------- NO INTERSECTIONS ------- !!!!!!!!")
+			print("No intersections found.")
 		errors.append(np.nan)
 		errors2.append(np.nan)
 		estimated_oris11.append(np.nan)
@@ -2172,185 +1526,3 @@ def get_two_circles_intersections(x1,y1,r1, x2,y2,r2):
 
 	return np.array([[ix1, iy1], [ix2, iy2]])
 
-# -------------------------- UWB Azimuth Matrix Prep ---------------------------
-
-def estimate_azimuths_from_positions(iphone_paths, shop_locations):
-	for path_id in iphone_paths: 
-		anchor_list, timestamps, uwb_azimuths, uwb_mask, median_dt = prepare_uwb_azimuth_matrix(iphone_paths, path_id, shop_locations, method="trilateration")
-		positions = iphone_paths[path_id]["trilateration"]["positions"] 
-		true_azimuths = iphone_paths[path_id]["trilateration"]["true azimuths"] 
-		res = orientation_fusion.run_full_azimuth_fusion(positions, median_dt, None, shop_locations, uwb_azimuths, uwb_mask, true_azimuths=true_azimuths)
-		print(res)
-
-def prepare_uwb_azimuth_matrix(iphone_paths, path_id, shop_locations, method: str = "trilateration"):
-	"""
-	Build matrices for UWB azimuth fusion.
-	Returns (timestamps, positions, anchor_list, az_mat, mask_mat, true_rel_angles)
-	- timestamps: (N,)
-	- positions: (N,2) measured positions (method key under iphone_paths[path_id][method])
-	- anchor_list: list[str] sorted anchor ids present in shop_locations
-	- az_mat: (N,M) UWB relative angles to anchors (radians where possible)
-	- mask_mat: (N,M) boolean availability mask
-	- true_rel_angles: (N,M) ground-truth relative angles derived from true path if present; else None
-	"""
-	path = iphone_paths[path_id]
-	if method not in path:
-		raise KeyError(f"Path {path_id} has no method '{method}'")
-	pdata = path[method]
-	ts = pdata.get("timestamps")
-	if ts is None:
-		ts = pdata.get("timestamp")
-	if ts is None:
-		ts = []
-	timestamps = np.asarray(ts, dtype=float)
-
-	pos = pdata.get("positions")
-	if pos is None:
-		pos = []
-	positions = np.asarray(pos, dtype=float)
-	if positions.ndim != 2 or positions.shape[1] != 2:
-		raise ValueError("positions must be (N,2)")
-
-	# Collect anchors present in shop_locations; keep deterministic S-id order
-	anchor_list = sorted([k for k in shop_locations.keys() if k.startswith('S')], key=lambda s: (int(s[1:]) if s[1:].isdigit() else 9999, s))
-	M = len(anchor_list)
-	N = positions.shape[0]
-	az_mat = np.full((N, M), np.nan, dtype=float)
-	mask_mat = np.zeros((N, M), dtype=bool)
-
-	# Try measured UWB azimuths under each anchor id within pdata
-	# Expect per-sample dict like pdata['azimuths'][i] = { 'S1': angle_deg, ... }
-	per_sample_az = pdata.get("azimuths")
-	if per_sample_az is not None and len(per_sample_az) == N:
-		for i in range(N):
-			row = per_sample_az[i]
-			# Row may be a dict of anchor->angle or a mapping of anchor->sequence (N,)
-			if isinstance(row, dict):
-				for j, sid in enumerate(anchor_list):
-					v = row.get(sid)
-					if v is None:
-						continue
-					val = float(v)
-					if abs(val) > np.pi + 0.1:
-						val = np.deg2rad(val)
-					az_mat[i, j] = val
-					mask_mat[i, j] = True
-			else:
-				# Fallback: if per_sample_az is already a (N,M) ndarray aligned to anchor_list
-				try:
-					arr = np.asarray(per_sample_az, dtype=float)
-					if arr.shape == (N, len(anchor_list)):
-						az_mat[:, :] = arr
-						mask_mat[:, :] = ~np.isnan(arr)
-						break
-				except Exception:
-					pass
-
-	# Optional: true relative angles
-	# Priority 1: if method entry has 'true azimuths' per anchor, use them (likely degrees)
-	true_rel_angles = None
-	if isinstance(pdata.get("true azimuths"), dict) and N > 0:
-		tru = pdata.get("true azimuths")
-		arr = np.full((N, M), np.nan, dtype=float)
-		for j, sid in enumerate(anchor_list):
-			vals = tru.get(sid)
-			if vals is None:
-				continue
-			v = np.asarray(vals, dtype=float)
-			L = min(N, v.shape[0])
-			arr[:L, j] = v[:L]
-		# convert to radians if appears to be degrees
-		deg_mask = np.abs(arr) > np.pi + 0.1
-		arr[deg_mask] = np.deg2rad(arr[deg_mask])
-		# wrap to [-pi, pi]
-		true_rel_angles = (arr + np.pi) % (2*np.pi) - np.pi
-	else:
-		# Priority 2: derive from a 'true' path (positions/timestamps)
-		if "true" in path and isinstance(path["true"], dict):
-			tpos = np.asarray(path["true"].get("positions") or [], dtype=float)
-			tt = np.asarray(path["true"].get("timestamps") or [], dtype=float)
-			if len(tpos) >= 2 and len(tt) == len(tpos) and len(timestamps) == N:
-				# align by closest indices
-				idxs = util.find_closest_ground_truth_indices(tt, timestamps, by_measured=True)
-				tpos_aligned = tpos[idxs]
-				# compute true relative angles
-				true_rel_angles = np.zeros((N, M), dtype=float)
-				for i in range(N):
-					pv = tpos_aligned[i]
-					for j, sid in enumerate(anchor_list):
-						av = np.asarray(shop_locations[sid][:2])
-						bearing = np.arctan2(av[1]-pv[1], av[0]-pv[0])
-						# motion heading from true positions
-						if i > 0:
-							dv = tpos_aligned[i] - tpos_aligned[i-1]
-						else:
-							dv = tpos_aligned[min(i+1, N-1)] - tpos_aligned[i]
-						yaw = np.arctan2(dv[1], dv[0])
-						true_rel_angles[i, j] = (bearing - yaw + np.pi) % (2*np.pi) - np.pi
-
-	return timestamps, positions, anchor_list, az_mat, mask_mat, true_rel_angles
-
-	"""Construct (uwb_azimuths, uwb_mask, median_dt) aligned to a consistent anchor order.
-
-	Inputs
-	- iphone_paths: dict produced by load_iphone_data/average_iphone_positions
-	- path_id: key in iphone_paths, e.g., 'P26_green'
-	- shop_locations: dict of anchor_id -> (x, y). Used to define consistent anchor ordering
-	- method: only 'trilateration' currently supported (expects per-anchor azimuth series)
-
-	Returns
-	- anchor_list: ordered list of anchors (by numeric id)
-	- timestamps: (N,) timestamps from the selected method
-	- uwb_azimuths: (N, M) float array, device-frame relative azimuths (degrees as stored, NaN where missing)
-	- uwb_mask: (N, M) bool array, True where measurement is present/finite
-	- median_dt: scalar, median sampling interval from timestamps
-	"""
-	if path_id not in iphone_paths:
-		raise KeyError(f"path_id {path_id} not in iphone_paths")
-	if method not in iphone_paths[path_id]:
-		raise KeyError(f"method '{method}' not found under iphone_paths[{path_id}]")
-
-	entry = iphone_paths[path_id][method]
-	if "timestamps" not in entry:
-		raise KeyError(f"iphone_paths[{path_id}][{method}] has no 'timestamps'")
-	if "azimuths" not in entry:
-		raise KeyError(f"iphone_paths[{path_id}][{method}] has no per-anchor 'azimuths' dict")
-
-	timestamps = np.asarray(entry["timestamps"], dtype=float)
-	N = len(timestamps)
-	# Consistent anchor order by numeric id (e.g., S1, S2, ... S12)
-	def anchor_key(a):
-		try:
-			return int(str(a)[1:])
-		except Exception:
-			return str(a)
-	anchor_list = sorted(list(shop_locations.keys()), key=anchor_key)
-	M = len(anchor_list)
-	
-	entry_azimuths = {}
-
-	for i in range(len(entry["azimuths"])):
-		for shop_id in shop_locations:
-			if shop_id not in entry_azimuths:
-				entry_azimuths[shop_id] = []
-			if shop_id not in entry["azimuths"][i]:
-				entry_azimuths[shop_id].append(np.nan)
-			else:
-				entry_azimuths[shop_id].append(entry["azimuths"][i][shop_id])
-
-	uwb_azimuths = np.full((N, M), np.nan, dtype=float)
-	for j, aid in enumerate(anchor_list):
-		series = entry_azimuths.get(aid, None)
-		if series is None:
-			continue
-		vals = np.asarray(series, dtype=float)
-		if vals.shape[0] != N:
-			# be defensive: align by min length
-			L = min(N, vals.shape[0])
-			uwb_azimuths[:L, j] = vals[:L]
-		else:
-			uwb_azimuths[:, j] = vals
-
-	uwb_mask = np.isfinite(uwb_azimuths)
-	median_dt = float(np.median(np.diff(timestamps))) if N > 1 else 1.0
-	return anchor_list, timestamps, uwb_azimuths, uwb_mask, median_dt

@@ -1,20 +1,11 @@
 import copy
-import random
-import time
 import numpy as np 
 import pandas as pd 
 import os 
 import matplotlib.pyplot as plt 
-import operator 
-import datetime as dt
-from colour import Color
 import sys 
-import torch 
 import util 
 import dataset 
-import constants 
-import seaborn.objects as so
-import seaborn as sns 
 import matplotlib.ticker as ticker
 import re
 import glob
@@ -126,47 +117,6 @@ def generate_complexity_sensitivity_artifacts(stats_dir="stats", out_dir="stats"
 	plt.close(fig)
 
 	return csv_path, png_path, pdf_path
-
-def print_iphone_data(iphone_paths, start=None, finish=None):
-	if not start:
-		start = 1
-	if not finish:
-		finish = len(iphone_paths)
-	print(sorted(list(iphone_paths.keys())))
-	for i in range(start, finish + 1):
-			path_id = f"P{i}"
-			if path_id not in iphone_paths:
-				continue
-			print("Path:", path_id)
-			for method in iphone_paths[path_id]:
-				if method[0] == "S":
-					print("\tMethod:", method)
-					for data_type in iphone_paths[path_id][method]:
-						print("\t\tData type:", data_type)
-						for key in sorted(list(iphone_paths[path_id][method][data_type].keys())):
-							#print(path_id, method, data_type, key, list(iphone_paths[path_id][method][data_type].keys()), iphone_paths[path_id][method][data_type][key])
-							try:
-								if key != "lidar start time" and len(iphone_paths[path_id][method][data_type][key].shape) < 2:
-									print(f"\t\t\t{key}:")
-
-									if False and "orientation" in key:
-										val1 = util.radians2degrees(iphone_paths[path_id][method][data_type][key][:5])
-										val2 = util.radians2degrees(iphone_paths[path_id][method][data_type][key][-5:])
-									else:
-										val1 = iphone_paths[path_id][method][data_type][key][:5]
-										val2 = iphone_paths[path_id][method][data_type][key][-5:]
-
-									text = "\t\t\t\t"
-									if "timestamp" in key:
-										st = iphone_paths[path_id][method][data_type]["lidar start time"]
-										text += f"{val1 - st} ... {val2 - st}"
-									elif key == "vector errors":
-										text += f"max - {np.max(iphone_paths[path_id][method][data_type][key])}"
-									else:
-										text += f"{val1} ... {val2}"
-									print(text)
-							except Exception as e:
-								print(e)
 
 def inject_noise_into_consolidated_ranges(
 	iphone_paths,
@@ -319,78 +269,22 @@ def run_noise_injection_direction_experiment(
 	print(f"Saved noise injection summary -> {summary_path}")
 	return summary_path
 
-def sort_paths_by_id(paths):
-	return sorted(paths.items(), key=lambda item: (int(item[0][1:]),))
-
-def plot_time_intervals_max_num_anchors_stats(max_num_anchorss, time_intervals, metric, stat, stat_method):
-	fig, ax = plt.subplots()
-	for time_interval in time_intervals:
-		data = []
-		for max_num_anchors in max_num_anchorss:
-			filename = f"stats/stats_anchors={max_num_anchors}_time_interval={time_interval}.csv"
-			if os.path.exists(filename):
-				temp = pd.read_csv(filename)
-				temp = temp.set_index(temp.columns[0])
-				
-				error = temp.loc[f"{metric} ({stat_method})", stat]
-				if "accuracy" in metric.lower():
-					error = error * 100
-				data.append(error)
-		ax.plot(max_num_anchorss, data, label=f"Time interval: {time_interval}", marker='o')
-	ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
-	ax.set_xlabel("Maximum number of anchors")
-	ax.set_ylabel(f"{'90th percentile' if stat == '90%' else 'Mean'} {metric.lower().replace('position', 'positioning').replace('method ', '')} ({'degrees' if 'azimuth' in metric.lower() else ('%' if 'accuracy' in metric.lower() else ('s' if 'time' in metric.lower() else 'm'))})")
-	#plt.title(f"{stat_method.capitalize().replace('Ekf', 'EKF')}-based {metric.lower()} vs. maximum number of anchors and time interval")
-	plt.legend()
-	plt.show()
-
 if __name__ == "__main__":
-	# Convenience: generate a CSV for path_id "P26_green" from iphone_paths and true_paths
-	# Assumes you have already called dataset.load_data or otherwise have iphone_paths/true_paths in scope.
-	# Example usage within your existing flow:
-	#   shop_locations, true_paths, iphone_paths, *_ = dataset.load_data(...)
-	# Then call the export function below.
-	# try:
-	# 	from export_path_csv import export_path_to_csv
-	# except Exception as e:
-	# 	print("Failed to import helpers for CSV export:", e)
-	# 	raise
-		
-	drop_risky_measured_azimuths = False 
-	drop_risky_true_azimuths = True 
-	drop_risky_true_distances = True
-	drop_risky_elevations = False 
-	check_vectors_for_sanity = False
-	check_abrupt_angle_changes = True 
-	lidar_data_dir = "lidar"
-	iphone_data_dir = "iphone"
-	train_start, train_finish = 26, 50 
+	lidar_data_dir = "../data/lidar"
+	iphone_data_dir = "../data/iphone"
+	train_start, train_finish = 26, 26
 	lidar_orientations = True 
-	methods = ["trilateration", "ekf"]
-	data_type = "unfiltered"
-	time_interval = .5
-	visual_start_time = None
-	visual_finish_time = None # seconds
-	load_print_data = True 
 	by_measured = True
-	show_iphone_orientations = False 
-	show_true_orientations = True
-	scatter_true_positions = False 
-	scatter_iphone_positions = True
 	cache_paths_on_disk = True
+	methods = ["trilateration", "ekf"]
 	dilateration_enabled = False  
-	max_num_anchors = 8
 	run_noise_injection_experiment = False
 	directions_mode = "all without front and back"
-	use_cached_outputs = True
 	azimuth_fusion_methods = []
 	max_num_anchorss = [6]
 	time_intervals = [0.5] 
 	print("Methods:", methods)
 	print("Dilateration enabled:", dilateration_enabled)
-	stat_method = "trilateration" 
-	metric = "Direction accuracy"
-	stat = "mean"
 	if not os.path.exists("ground-truth"):
 		os.makedirs("ground-truth")
 	if not os.path.exists("path_files"):
@@ -402,12 +296,6 @@ if __name__ == "__main__":
 		lidar_data_dir, 
 		lidar_orientations,
 		iphone_data_dir,
-		drop_risky_measured_azimuths, 
-		drop_risky_true_azimuths,
-		drop_risky_elevations, 
-		drop_risky_true_distances,
-		check_vectors_for_sanity,
-		check_abrupt_angle_changes,
 		by_measured,
 		start=train_start,
 		finish=train_finish,
@@ -444,7 +332,6 @@ if __name__ == "__main__":
 	for max_num_anchors in max_num_anchorss:
 		for time_interval in time_intervals[::-1]:
 			print(f"Time interval: {time_interval}, max num anchors: {max_num_anchors}")
-			start_time = time.time()
 			iphone_paths = dataset.average_iphone_positions(iphone_paths, shop_locations, time_interval, max_num_anchors, methods, imu_data, dilateration_enabled=dilateration_enabled, use_cached_outputs=True)
 
 			(_, _, _, stats_df, dir_accs, *_) = dataset.evaluate_motion_errors(iphone_paths, true_paths, shop_locations, methods, directions_mode, azimuth_fusion_methods)

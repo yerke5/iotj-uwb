@@ -1,9 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt 
-import matplotlib.collections as mcoll
-import matplotlib.path as mpath
-import pandas as pd
 import math
+
+DUMMY = -1000 
 
 def calculate_classification_metrics(true_labels, predicted_labels): 
 	# print("Number of nan values in true labels:", len(true_labels[np.isnan(true_labels)]))
@@ -64,37 +63,6 @@ def calculate_classification_metrics(true_labels, predicted_labels):
 	result['F1'] = result['Macro F1']
 
 	return result 
-
-def bootstrap_classification_metrics(true_labels, predicted_labels, n_bootstrap=10000, confidence=0.95, random_state=42):
-	true_labels = np.array(true_labels)
-	predicted_labels = np.array(predicted_labels)
-	if len(true_labels) == 0 or len(predicted_labels) == 0:
-		return {}
-	if len(true_labels) != len(predicted_labels):
-		raise ValueError("true_labels and predicted_labels must have the same length")
-
-	rng = np.random.default_rng(random_state)
-	metric_names = ['Accuracy', 'Precision', 'Recall', 'Macro F1', 'Weighted F1', 'Sensitivity', 'Specificity']
-	bootstrap_values = {metric: [] for metric in metric_names}
-	point_estimates = calculate_classification_metrics(true_labels, predicted_labels)
-
-	for _ in range(n_bootstrap):
-		idx = rng.integers(0, len(true_labels), len(true_labels))
-		metrics = calculate_classification_metrics(true_labels[idx], predicted_labels[idx])
-		for metric in metric_names:
-			bootstrap_values[metric].append(metrics[metric])
-
-	alpha = (1 - confidence) / 2
-	result = {}
-	for metric in metric_names:
-		values = np.array(bootstrap_values[metric], dtype=float)
-		result[metric] = {
-			'mean': float(point_estimates[metric]),
-			'ci_lower': float(np.quantile(values, alpha)),
-			'ci_upper': float(np.quantile(values, 1 - alpha))
-		}
-
-	return result
 
 def bootstrap_classification_metrics_mbb(true_labels, predicted_labels, n_bootstrap=2000, confidence=0.95, block_length=None, random_state=42):
 	"""Moving-block bootstrap for classification metrics.
@@ -172,77 +140,6 @@ def bootstrap_classification_metrics_mbb(true_labels, predicted_labels, n_bootst
 		}
 	
 	return result
-
-def bootstrap_accuracy_difference_mbb(labels_a, true_a, labels_b, true_b, n_bootstrap=2000, confidence=0.95, block_length=None, random_state=42):
-	"""MBB CI for the accuracy difference between two methods.
-	
-	Bootstraps the paired-difference sequence d_t = I_a,t - I_b,t to preserve
-	the pairing of methods at the same prediction instances. If sequences have
-	different lengths, truncates to min length to maintain alignment
-	(both methods follow the same (path, shop, direction) ordering).
-	
-	Returns (mean_diff, ci_lower, ci_upper, block_length_used).
-	"""
-	labels_a = np.array(labels_a)
-	true_a = np.array(true_a)
-	labels_b = np.array(labels_b)
-	true_b = np.array(true_b)
-	
-	# Truncate to equal length for paired comparison
-	min_len = min(len(labels_a), len(labels_b))
-	if min_len == 0:
-		return np.nan, np.nan, np.nan, 0
-	
-	labels_a = labels_a[:min_len]
-	true_a = true_a[:min_len]
-	labels_b = labels_b[:min_len]
-	true_b = true_b[:min_len]
-	
-	correct_a = (labels_a == true_a).astype(float)
-	correct_b = (labels_b == true_b).astype(float)
-	diffs = correct_a - correct_b
-	point_diff = np.mean(diffs)
-	
-	if block_length is None:
-		# Estimate from ACF of paired-difference sequence
-		n_d = len(diffs)
-		mean_d = np.mean(diffs)
-		var_d = np.var(diffs)
-		if var_d > 0 and n_d >= 10:
-			max_lag = min(30, n_d // 4)
-			acf = np.zeros(max_lag + 1)
-			acf[0] = 1.0
-			for k in range(1, max_lag + 1):
-				if n_d - k <= 1:
-					break
-				acf[k] = np.sum((diffs[:-k] - mean_d) * (diffs[k:] - mean_d)) / ((n_d - k) * var_d)
-			block_length = 1
-			for k in range(1, len(acf) - 3):
-				if all(abs(acf[k + i]) < 0.05 for i in range(4)):
-					block_length = k
-					break
-			if block_length < 1:
-				block_length = 1
-		else:
-			block_length = 1
-	
-	block_length = max(1, int(block_length))
-	n_blocks = max(2, int(np.ceil(min_len / block_length)))
-	
-	rng = np.random.default_rng(random_state)
-	bootstrap_diffs = np.zeros(n_bootstrap)
-	
-	for i in range(n_bootstrap):
-		block_starts = rng.integers(0, max(1, min_len - block_length + 1), size=n_blocks)
-		indices = np.concatenate([np.arange(s, min(s + block_length, min_len)) for s in block_starts])
-		indices = indices[:min_len]
-		bootstrap_diffs[i] = np.mean(diffs[indices])
-	
-	alpha = (1 - confidence) / 2
-	ci_lo = float(np.quantile(bootstrap_diffs, alpha))
-	ci_hi = float(np.quantile(bootstrap_diffs, 1 - alpha))
-	
-	return float(point_diff), ci_lo, ci_hi, block_length
 
 def _compute_acf(series, max_lag=30):
 	series = np.asarray(series, float)
@@ -506,64 +403,6 @@ def _plot_confusion_matrix_on_axis(ax, conf_matrix, classes, title, show_ylabel=
 
 	return im
 
-def confusion_matrix(true_labels, predicted_labels): 
-	"""
-	Generate and plot a confusion matrix for multi-class classification.
-	
-	Args:
-		true_labels: Array of true class labels (integers)
-		predicted_labels: Array of predicted class labels (integers)
-	
-	Returns:
-		conf_matrix: The confusion matrix as a numpy array
-	"""
-	conf_matrix, classes = _build_confusion_matrix(true_labels, predicted_labels)
-	fig, ax = plt.subplots(figsize=(10, 8))
-	im = _plot_confusion_matrix_on_axis(ax, conf_matrix, classes, 'Confusion Matrix', show_ylabel=True)
-	fig.colorbar(im, ax=ax)
-	fig.tight_layout()
-	plt.show()
-	return conf_matrix
-
-def plot_confusion_matrices(confusion_inputs):
-	ordered_items = [item for item in confusion_inputs if len(item[1]) > 0 and len(item[2]) > 0]
-	if len(ordered_items) == 0:
-		return []
-
-	all_classes = np.unique(
-		np.concatenate([
-			np.concatenate([np.array(true_labels), np.array(predicted_labels)])
-			for _, true_labels, predicted_labels in ordered_items
-		])
-	)
-
-	fig, axes = plt.subplots(
-		1,
-		len(ordered_items),
-		figsize=(5.8 * len(ordered_items), 5.8),
-		squeeze=False,
-		constrained_layout=True,
-	)
-	matrices = []
-	image = None
-	for idx, (title, true_labels, predicted_labels) in enumerate(ordered_items):
-		conf_matrix, classes = _build_confusion_matrix(true_labels, predicted_labels, classes=all_classes)
-		matrices.append(conf_matrix)
-		image = _plot_confusion_matrix_on_axis(
-			axes[0, idx],
-			conf_matrix,
-			classes,
-			title,
-			show_ylabel=(idx == 0),
-		)
-
-	if image is not None:
-		fig.colorbar(image, ax=axes.ravel().tolist(), fraction=0.03, pad=0.03)
-	fig.supxlabel('Predicted label')
-	fig.supylabel('True label')
-	plt.show()
-	return matrices
-
 def calculate_position_availability(timestamps, time_interval):
 	last_ts = timestamps[-1]
 	i = 0
@@ -720,68 +559,11 @@ def positions2orientations(positions, steps=1):
 			orientations[i] = calculate_vector_theta(delta) 
 	return degrees2radians(orientations)
 
-def gradient_line(ax, x, y):
-	path = mpath.Path(np.column_stack([x, y]))
-	verts = path.interpolated(steps=3).vertices
-	x, y = verts[:, 0], verts[:, 1]
-	z = np.linspace(0, 1, len(x))
-	colorline(ax, x, y, z, cmap=plt.get_cmap('jet'), linewidth=2)
-
-def colorline(
-	ax, x, y, z=None, cmap=plt.get_cmap('copper'), norm=plt.Normalize(0.0, 1.0),
-		linewidth=3, alpha=1.0):
-	"""
-	http://nbviewer.ipython.org/github/dpsanders/matplotlib-examples/blob/master/colorline.ipynb
-	http://matplotlib.org/examples/pylab_examples/multicolored_line.html
-	Plot a colored line with coordinates x and y
-	Optionally specify colors in the array z
-	Optionally specify a colormap, a norm function and a line width
-	"""
-
-	# Default colors equally spaced on [0,1]:
-	if z is None:
-		z = np.linspace(0.0, 1.0, len(x))
-
-	# Special case if a single number:
-	if not hasattr(z, "__iter__"):  # to check for numerical input -- this is a hack
-		z = np.array([z])
-
-	z = np.asarray(z)
-
-	segments = make_segments(x, y)
-	lc = mcoll.LineCollection(segments, array=z, cmap=cmap, norm=norm,
-							  linewidth=linewidth, alpha=alpha)
-
-	#ax = ax.gca()
-	ax.add_collection(lc)
-
-	return lc
-
-
-def make_segments(x, y):
-	"""
-	Create list of line segments from x and y coordinates, in the correct format
-	for LineCollection: an array of the form numlines x (points per line) x 2 (x
-	and y) array
-	"""
-
-	points = np.array([x, y]).T.reshape(-1, 1, 2)
-	segments = np.concatenate([points[:-1], points[1:]], axis=1)
-	return segments
-
-def calculate_position(compass_value, azimuth, distance):
-	theta = degrees2radians(90 - azimuth - compass_value)
-	return np.array([distance * np.cos(theta), distance * np.sin(theta)])
-
 def degrees2radians(deg):
 	return deg / 180 * np.pi 
 
 def radians2degrees(rad):
 	return rad / np.pi * 180
-
-def calculate_vector_bearing(vector):
-	theta = calculate_vector_theta(vector)
-	return (450 - theta) % 360
 
 def calculate_vector_theta(vector):
 	x, y = vector[0], vector[1]
@@ -796,17 +578,6 @@ def calculate_vector_theta(vector):
 			theta = 180 - theta
 		else: # quadrant III
 			theta = 180 + theta
-	return theta
-
-def calculate_vector_thetas(vectors):
-	x, y = vectors[:, 0], vectors[:, 1]
-	theta = np.arctan(np.abs(y) / np.abs(x)) / np.pi * 180
-	mask1 = (vectors[:, 0] > 0) & (vectors[:, 1] < 0)
-	mask2 = (vectors[:, 0] < 0) & (vectors[:, 1] > 0)
-	mask3 = (vectors[:, 0] < 0) & (vectors[:, 1] < 0)
-	theta[mask1] = 360 - theta[mask1]
-	theta[mask2] = 180 - theta[mask2]
-	theta[mask3] = 180 + theta[mask3]
 	return theta
 
 def get_orientation(position, idx, orientation_steps):
@@ -935,20 +706,6 @@ def get_vector_directions(pivots, vectors):
 	signs[dot_products < 0] = -1
 	return signs
 
-def get_vector(distance, angle):
-	return np.array([distance * np.cos(np.radians(angle)), distance * np.sin(np.radians(angle))])
-
-def get_azimuths_to_other_shops(target_ori_theta, distance, azimuth, anchor_positions, shop_id):
-	azimuths = {}
-	target_ori_vector = get_vector(1, target_ori_theta)
-	ta = get_vector(distance, 90 - azimuth - theta_to_bearing(target_ori_theta))
-	ot = anchor_positions[shop_id] - ta
-	for other_shop_id in anchor_positions:
-		ta_i = anchor_positions[other_shop_id] - ot
-		azimuths[other_shop_id] = calculate_azimuths(target_ori_vector.reshape(1, 2), ta_i.reshape(1, 2))[0]
-		#print("azimuth result shape:", azimuths[other_shop_id].shape)
-	return azimuths
-
 def calculate_azimuths(orientations, vectors):
 	return get_vector_directions(orientations, vectors) * calculate_angles_between_vectors(orientations, vectors)
 
@@ -1033,55 +790,5 @@ def estimate_motion_azimuths(uwb_azimuths, delta_thetas, azimuth_signs, add):
 	#print("after fix:", estimated_azimuths)
 	return estimated_azimuths
 	
-def bar_plot(data, x_labels, title, xa_label, ya_label, get_axis=False, separate_legend=False, cols=None, ylimits=None):
-	df = pd.DataFrame(data=data, index=x_labels)
-	if cols:
-		df = df[cols]
-	#print(df)
-	
-	ax = df.plot.bar(rot=15, title=title, colormap="cool", edgecolor="white")
-	ax.set(xlabel=xa_label, ylabel=ya_label)
-
-	if separate_legend:
-		box = ax.get_position()
-		ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
-
-		# Put a legend to the right of the current axis
-		ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-
-	if ylimits is not None:
-		ax.set_ylim(bottom=ylimits[0], top=ylimits[1])
-	plt.tight_layout()
-	if not get_axis:
-		plt.show()
-	else:
-		return ax
-
 def calculate_distance_between_vectors(v1, v2):
 	return np.sqrt(np.sum((v1 - v2)**2, axis=1))
-
-def plot_histogram(data, xlabel, ylabel, label, ax, line=False, color=None, show=True, marker=None, cumul=True, bins=5):
-	if show:
-		fig, ax = plt.subplots()
-	if line:
-		count, bins_count = np.histogram(data, bins=bins) 
-		pdf = count / sum(count) 
-		cdf = np.cumsum(pdf) 
-		if cumul:
-			ax.plot(bins_count[1:], cdf, label=label if label is not None else "", color=color if color else "black", marker=marker if marker else ">")
-		else:
-			ax.plot(bins_count[1:], pdf, label=label if label is not None else "", color=color if color else "black", marker=marker if marker else ">")
-
-	else:
-		if cumul:
-			ax.hist(data, label=label if label is not None else "", density=True, cumulative=True, weights=np.ones_like(data) * 100 / len(data), alpha=.3, linewidth=1, edgecolor="black", bins=bins, color=color if color else "black")
-		else:
-			ax.hist(data, label=label if label is not None else "", density=True, cumulative=False, weights=np.ones_like(data) * 100 / len(data), alpha=.3, linewidth=1, edgecolor="black", bins=bins, color=color if color else "black")
-	
-	ax.set_xlabel(xlabel)
-	ax.set_ylabel(ylabel)
-
-	if label is not None:
-		plt.legend()
-	if show:
-		plt.show()
