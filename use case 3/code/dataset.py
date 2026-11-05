@@ -1363,6 +1363,7 @@ def save_shops(shop_locations, shops_filename):
 	df["Shop"] = df.index 
 	df = df.reset_index(drop=True)
 	df.columns = ["X", "Y", "Shop"]
+	os.makedirs(os.path.dirname(shops_filename), exist_ok=True)
 	df.to_csv(shops_filename, index=False)
 
 
