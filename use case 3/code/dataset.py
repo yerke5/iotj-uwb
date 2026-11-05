@@ -1147,7 +1147,7 @@ def evaluate_motion_errors(iphone_paths, true_paths, shop_locations, methods, di
 	import matplotlib.pyplot as plt
 
 	# Override UWB labels with standalone 0.5 s aggregated predictions if available
-	standalone_uwb_path = os.path.join("stats", "uwb_standalone_labels.npz")
+	standalone_uwb_path = os.path.join("../output", "uwb_standalone_labels.npz")
 	if os.path.exists(standalone_uwb_path):
 		uwb_data = np.load(standalone_uwb_path)
 		true_labels['UWB only'] = list(uwb_data['dir_true'])
@@ -1168,18 +1168,18 @@ def evaluate_motion_errors(iphone_paths, true_paths, shop_locations, methods, di
 			fig.colorbar(image, ax=axes.ravel().tolist(), fraction=0.03, pad=0.03)
 		fig.supxlabel('Predicted label')
 		fig.supylabel('True label')
-		out_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'latex', 'images', 'confusion_matrices2.png')
+		out_path = os.path.join("..", "output", "confusion_matrices.png")
 		os.makedirs(os.path.dirname(out_path), exist_ok=True)
 		fig.savefig(out_path, dpi=150, bbox_inches='tight')
 		plt.close(fig)
 		print(f"\nConfusion matrices saved to: {out_path}")
 
 	# Save paired correctness for temporal dependence MBB analysis
-	paired_path = os.path.join("stats", "paired_correctness.npz")
-	os.makedirs("stats", exist_ok=True)
+	paired_path = os.path.join("../output", "paired_correctness.npz")
+	os.makedirs("../output", exist_ok=True)
 
 	# Save FULL per-method binary correctness (for per-method ACF/block_length)
-	full_path = os.path.join("stats", "per_method_correctness.npz")
+	full_path = os.path.join("../output", "per_method_correctness.npz")
 	full_data = {}
 	for method_name, display in [('trilateration', 'Multilateration'), ('ekf', 'EKF'), ('UWB only', 'UWB')]:
 		if method_name in predicted_labels and len(predicted_labels[method_name]) > 0:
@@ -1320,7 +1320,7 @@ def evaluate_motion_errors(iphone_paths, true_paths, shop_locations, methods, di
 				uwb_paired = uwb_az[:n_shared]
 			else:
 				# EKF vs UWB: load standalone 0.5s-aggregated UWB per-position data
-				standalone_path = os.path.join("stats", "uwb_standalone_labels.npz")
+				standalone_path = os.path.join("../output", "uwb_standalone_labels.npz")
 				if not os.path.exists(standalone_path):
 					continue
 				standalone = np.load(standalone_path)

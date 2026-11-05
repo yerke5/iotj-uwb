@@ -39,14 +39,27 @@ Key configuration in `main.py`:
 - `max_num_anchorss = [6]`
 - `time_intervals = [0.5]`
 
+## Data layout (`use case 3/data/`)
+
+The input data is organized by batch number. Batch folders are named `batch1`,
+`batch2`, … (no space).
+
+- `iphone/` — iPhone sensor logs, one batch folder per run:
+  - `iphone/batch1/B26_UWB.csv` — UWB range/azimuth measurements
+  - `iphone/batch1/B26_IMU.csv` — inertial (IMU) measurements
+- `lidar/` — LiDAR logs, one batch folder per run. The lidar folder must
+  contain the ground-truth locations of the anchors (one `S*.log` file per
+  anchor, e.g. `S1.log`, `S2.log`, …) and the ground-truth trajectory of each
+  measured path (one `P*.log` file per path, e.g. `P26.log`).
+
 ## Output
 
-Running `main.py` produces (inside `use case 3/code/`):
+Running `main.py` writes the evaluation results to `use case 3/output/`:
 
-- `stats/stats_anchors=6_time_interval=0.5.csv` — per-method error statistics
+- `stats_anchors=6_time_interval=0.5.csv` — per-method error statistics
   (position error, distance error, azimuth error, direction accuracy,
   inference time, memory footprint)
-- `stats/complexity_sensitivity.{csv,png,pdf}` — sensitivity plots
+- `complexity_sensitivity.{csv,png,pdf}` — sensitivity plots
 
 Intermediate cached results are written to `npy/`, `ground-truth/`, and
-`path_files/` and can be deleted safely between runs.
+`path_files/` inside `use case 3/code/` and can be deleted safely between runs.

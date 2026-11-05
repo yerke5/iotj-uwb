@@ -24,7 +24,7 @@ def _extract_mean_stat(stats_df, index_name):
 	vals = vals[~pd.isna(vals)]
 	return float(vals.iloc[0]) if len(vals) > 0 else np.nan
 
-def generate_complexity_sensitivity_artifacts(stats_dir="stats", out_dir="stats", max_num_anchorss=None, time_intervals=None):
+def generate_complexity_sensitivity_artifacts(stats_dir="../output", out_dir="../output", max_num_anchorss=None, time_intervals=None):
 	"""Aggregate complexity stats across all tested settings and render sensitivity plots.
 
 	Returns:
@@ -191,7 +191,7 @@ def run_noise_injection_direction_experiment(
 	range_mu_m=0.15,
 	range_sigma_m=0.30,
 	seed=42,
-	stats_dir="stats",
+	stats_dir="../output",
 ):
 	"""Run baseline vs noisy direction-inference evaluation using existing implementation."""
 	os.makedirs(stats_dir, exist_ok=True)
@@ -322,7 +322,7 @@ if __name__ == "__main__":
 			range_mu_m=0.15,
 			range_sigma_m=0.30,
 			seed=42,
-			stats_dir="stats",
+			stats_dir="../output",
 		)
 		print("Noise injection experiment completed.")
 		if summary_csv is not None:
@@ -335,12 +335,12 @@ if __name__ == "__main__":
 			iphone_paths = dataset.average_iphone_positions(iphone_paths, shop_locations, time_interval, max_num_anchors, methods, imu_data, dilateration_enabled=dilateration_enabled, use_cached_outputs=True)
 
 			(_, _, _, stats_df, dir_accs, *_) = dataset.evaluate_motion_errors(iphone_paths, true_paths, shop_locations, methods, directions_mode, azimuth_fusion_methods)
-			stats_df.to_csv(f"stats/stats_anchors={max_num_anchors}_time_interval={time_interval}.csv")
+			stats_df.to_csv(f"../output/stats_anchors={max_num_anchors}_time_interval={time_interval}.csv")
 			print("dir_accs:", dir_accs)
 
 	sensitivity_csv_path, sensitivity_png_path, sensitivity_pdf_path = generate_complexity_sensitivity_artifacts(
-		stats_dir="stats",
-		out_dir="stats",
+		stats_dir="../output",
+		out_dir="../output",
 		max_num_anchorss=max_num_anchorss,
 		time_intervals=time_intervals,
 	)
