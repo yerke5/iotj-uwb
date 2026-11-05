@@ -272,7 +272,7 @@ def run_noise_injection_direction_experiment(
 if __name__ == "__main__":
 	lidar_data_dir = "../data/lidar"
 	iphone_data_dir = "../data/iphone"
-	train_start, train_finish = 26, 26
+	start_path_id, end_path_id = 26, 26
 	lidar_orientations = True 
 	by_measured = True
 	cache_paths_on_disk = True
@@ -297,8 +297,8 @@ if __name__ == "__main__":
 		lidar_orientations,
 		iphone_data_dir,
 		by_measured,
-		start=train_start,
-		finish=train_finish,
+		start=start_path_id,
+		finish=end_path_id,
 		cache_paths_on_disk=cache_paths_on_disk
 	)
 	print("Shop locations:", shop_locations)

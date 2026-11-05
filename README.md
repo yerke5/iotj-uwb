@@ -9,8 +9,6 @@ UWB-based indoor localization.
 - `use case 2/` — two-anchor positioning experiments
 - `use case 3/` — multi-anchor UWB/IMU fusion experiments (code + sample data)
 
-Raw sensor logs under `raw data/` folders are excluded from this repository.
-
 ## Requirements
 
 Python 3.8+ with the following packages:
@@ -31,8 +29,8 @@ python3 main.py
 ```
 
 `main.py` is configured to process a single path (P26, via
-`train_start = train_finish = 26`). To run other paths, add the corresponding
-data under `use case 3/data/` and update `train_start` / `train_finish` in
+`start_path_id = end_path_id = 26`). To run other paths, add the corresponding
+data under `use case 3/data/` and update `start_path_id` / `end_path_id` in
 `main.py`.
 
 Key configuration in `main.py`:
